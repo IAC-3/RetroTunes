@@ -23,6 +23,7 @@ pub struct SongInfo {
   format: Option<String>,
   rating: Option<String>,
   lyrics: Option<String>,
+  size_bytes: Option<u64>,
 }
 
 #[derive(Serialize, Clone)]
@@ -30,6 +31,14 @@ pub struct PlaylistSongMetadata {
   pub title: Option<String>,
   pub album: Option<String>,
   pub performer: Option<String>,
+  pub time: Option<String>,
+  pub release: Option<String>,
+  pub bitrate: Option<String>,
+  pub sample: Option<String>,
+  pub depth: Option<String>,
+  pub format: Option<String>,
+  pub rating: Option<String>,
+  pub size_bytes: Option<u64>,
 }
 
 #[derive(Serialize, Clone)]
@@ -143,9 +152,25 @@ fn load_playlist() -> Result<Playlist, String> {
             .or_else(|| song_obj.get("album").and_then(Value::as_str).map(String::from)),
           performer: meta.and_then(|m| m.get("performer").and_then(Value::as_str).map(String::from))
             .or_else(|| song_obj.get("performer").and_then(Value::as_str).map(String::from)),
+          time: meta.and_then(|m| m.get("time").and_then(Value::as_str).map(String::from))
+            .or_else(|| song_obj.get("time").and_then(Value::as_str).map(String::from)),
+          release: meta.and_then(|m| m.get("release").and_then(Value::as_str).map(String::from))
+            .or_else(|| song_obj.get("release").and_then(Value::as_str).map(String::from)),
+          bitrate: meta.and_then(|m| m.get("bitrate").and_then(Value::as_str).map(String::from))
+            .or_else(|| song_obj.get("bitrate").and_then(Value::as_str).map(String::from)),
+          sample: meta.and_then(|m| m.get("sample").and_then(Value::as_str).map(String::from))
+            .or_else(|| song_obj.get("sample").and_then(Value::as_str).map(String::from)),
+          depth: meta.and_then(|m| m.get("depth").and_then(Value::as_str).map(String::from))
+            .or_else(|| song_obj.get("depth").and_then(Value::as_str).map(String::from)),
+          format: meta.and_then(|m| m.get("format").and_then(Value::as_str).map(String::from))
+            .or_else(|| song_obj.get("format").and_then(Value::as_str).map(String::from)),
+          rating: meta.and_then(|m| m.get("rating").and_then(Value::as_str).map(String::from))
+            .or_else(|| song_obj.get("rating").and_then(Value::as_str).map(String::from)),
+          size_bytes: meta.and_then(|m| m.get("size_bytes").and_then(Value::as_u64))
+            .or_else(|| song_obj.get("size_bytes").and_then(Value::as_u64)),
         }
       } else {
-        PlaylistSongMetadata { title: None, album: None, performer: None }
+        PlaylistSongMetadata { title: None, album: None, performer: None, time: None, release: None, bitrate: None, sample: None, depth: None, format: None, rating: None, size_bytes: None }
       };
 
       id.map(|id| PlaylistSong { id, metadata, exists })
@@ -239,6 +264,14 @@ fn update_all_songs_playlist(current_songs: &[SongInfo]) -> Result<Playlist, Str
       title: song.title.clone(),
       album: song.album.clone(),
       performer: song.performer.clone(),
+      time: song.time.clone(),
+      release: song.release.clone(),
+      bitrate: song.bitrate.clone(),
+      sample: song.sample.clone(),
+      depth: song.depth.clone(),
+      format: song.format.clone(),
+      rating: song.rating.clone(),
+      size_bytes: song.size_bytes,
     };
 
     if let Some(entry) = playlist.songs.iter_mut().find(|entry| entry.id == id) {
@@ -313,6 +346,7 @@ fn scan_all_paths(paths: &[String]) -> Result<ScanResult, String> {
             format: None,
             rating: None,
             lyrics: None,
+            size_bytes: None,
           };
           info.id = make_song_id(&info);
           info
@@ -334,6 +368,7 @@ fn scan_all_paths(paths: &[String]) -> Result<ScanResult, String> {
             format: None,
             rating: None,
             lyrics: None,
+            size_bytes: None,
           };
           info.id = make_song_id(&info);
           info
@@ -521,6 +556,7 @@ fn parse_mediainfo(path: &str, song_id: &str) -> Result<SongInfo, String> {
   let rating = None;
   let lyrics = get_string_field(general, &["lyrics", "lyric"]);
   let cover = image.map(|_| true);
+  let size_bytes = std::fs::metadata(path).ok().map(|meta| meta.len());
 
   Ok(SongInfo {
     id: song_id.to_string(),
@@ -537,6 +573,7 @@ fn parse_mediainfo(path: &str, song_id: &str) -> Result<SongInfo, String> {
     format,
     rating,
     lyrics,
+    size_bytes,
   })
 }
 

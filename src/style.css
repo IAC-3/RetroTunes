@@ -66,6 +66,88 @@ body {
   z-index: 1000;
 }
 
+.playlist-bar {
+  position: fixed;
+  top: 16vh;
+  left: 24vw;
+  width: calc(100vw - 24vw);
+  height: 18vh;
+  background-color: #333232;
+  border-bottom: 2px solid #000;
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+}
+
+.playlist-bar-content {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+}
+
+.playlist-cover {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 0;
+  background-color: #1f1f1f;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+}
+
+.playlist-details {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.playlist-title {
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.playlist-description {
+  color: #d4d4d4;
+  font-size: 14px;
+  margin-top: 4px;
+  max-width: 80vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playlist-item.selected {
+  position: relative;
+  border: 3px dashed #ffff00;
+  overflow: hidden;
+}
+
+.playlist-item.selected::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(90deg, transparent 0%, transparent 48%, rgba(255, 255, 0, 0.16) 50%, transparent 52%, transparent 100%);
+  background-size: 24px 100%;
+  animation: selectedDashMove 0.8s linear infinite;
+}
+
+@keyframes selectedDashMove {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 24px 0;
+  }
+}
+
 /* =====================================================
    SIDEBAR
    ===================================================== */
@@ -198,8 +280,6 @@ body {
 .add-playlist-btn {
   margin-bottom: 20px;
 }
-  color: #555;
-}
 
 /* =====================================================
    MAIN CONTENT
@@ -207,17 +287,110 @@ body {
 
 .main-content {
   position: fixed;
-  top: 16vh;
+  top: 34vh;
   left: 24vw;
   width: calc(100vw - 24vw);
-  height: calc(100vh - 16vh);
-  overflow-y: auto;
-  padding: 20px;
+  height: calc(100vh - 34vh - 6vh);
+  overflow: hidden;
   background: linear-gradient(135deg, #1e1e2e 0%, #2a2a3e 100%);
 }
 
+.song-table-placeholder {
+  color: #d4d4d4;
+  font-size: 16px;
+  text-align: center;
+  padding: 32px 0;
+}
+
+.song-table-container {
+  width: 100%;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+
+.song-table {
+  width: 100%;
+  min-width: 1400px;
+  min-height: 100%;
+  border-collapse: collapse;
+}
+
+.song-table th,
+.song-table td {
+  padding: 14px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  font-family: 'Ithaca', serif;
+  font-size: 14px;
+  color: #111;
+}
+
+.song-table th {
+  background-color: #B3B0B0;
+  color: #111;
+  font-weight: 700;
+  text-align: left;
+}
+
+.song-table tr:nth-child(even) {
+  background-color: #EDEDED;
+}
+
+.song-table tr:nth-child(odd) {
+  background-color: #B8CAD2;
+}
+
+.song-cover-cell {
+  width: 80px;
+}
+
+.song-cover-placeholder {
+  width: 60px;
+  height: 60px;
+  background-color: #999;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 12px;
+}
+
+.song-table td span {
+  display: inline-block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bottom-bar {
+  position: fixed;
+  bottom: 0;
+  left: 24vw;
+  width: calc(100vw - 24vw);
+  height: 6vh;
+  background-color: #B3B0B0;
+  border-top: 1px solid #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+
+.bottom-bar-content {
+  color: #111;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
 #app {
-  max-width: 600px;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  padding: 0;
+  box-sizing: border-box;
 }
 
 form {
