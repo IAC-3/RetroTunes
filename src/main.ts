@@ -20,9 +20,15 @@ let currentPlaylists: Playlist[] = []
 let selectedPlaylistName: string | null = null
 let currentSearchQuery = ''
 let currentSongsById: Record<string, SongInfo> = {}
+let currentSongsByMetadata: Record<string, SongInfo[]> = {}
+let currentSongsByTitlePerformer: Record<string, SongInfo[]> = {}
+let currentSongsByTitle: Record<string, SongInfo[]> = {}
 let playbackQueue: SongInfo[] = []
 let currentPlaybackIndex = 0
 let audioPlayer: HTMLAudioElement | null = null
+let currentAudioObjectUrl: string | null = null
+let audioSrcCache = new Map<string, string>()
+let audioLoadingPromises: Record<string, Promise<string | null>> = {}
 
 interface SongInfo {
   id: string
@@ -155,21 +161,84 @@ function normalizeText(value?: string) {
   return value?.trim().toLowerCase() || ''
 }
 
+function getSongMetadataKey(song: { title?: string; album?: string; performer?: string }) {
+  const title = normalizeText(song.title)
+  const album = normalizeText(song.album)
+  const performer = normalizeText(song.performer)
+  if (!title && !album && !performer) return ''
+  return `${title}|${album}|${performer}`
+}
+
+function getSongTitlePerformerKey(song: { title?: string; performer?: string }) {
+  const title = normalizeText(song.title)
+  const performer = normalizeText(song.performer)
+  if (!title || !performer) return ''
+  return `${title}|${performer}`
+}
+
+function getSongTitleKey(song: { title?: string }) {
+  return normalizeText(song.title)
+}
+
+function setCurrentSongs(songs: SongInfo[]) {
+  currentSongsById = {}
+  currentSongsByMetadata = {}
+  currentSongsByTitlePerformer = {}
+  currentSongsByTitle = {}
+
+  songs.forEach((song) => {
+    currentSongsById[song.id] = song
+
+    const metaKey = getSongMetadataKey(song)
+    if (metaKey) {
+      if (!currentSongsByMetadata[metaKey]) currentSongsByMetadata[metaKey] = []
+      currentSongsByMetadata[metaKey].push(song)
+    }
+
+    const titlePerformerKey = getSongTitlePerformerKey(song)
+    if (titlePerformerKey) {
+      if (!currentSongsByTitlePerformer[titlePerformerKey]) currentSongsByTitlePerformer[titlePerformerKey] = []
+      currentSongsByTitlePerformer[titlePerformerKey].push(song)
+    }
+
+    const titleKey = getSongTitleKey(song)
+    if (titleKey) {
+      if (!currentSongsByTitle[titleKey]) currentSongsByTitle[titleKey] = []
+      currentSongsByTitle[titleKey].push(song)
+    }
+  })
+}
+
 function findSongInfoForPlaylistSong(entry: PlaylistSong) {
   const direct = currentSongsById[entry.id]
-  if (direct) return direct
+  if (direct) {
+    return direct
+  }
 
-  const normalizedTitle = normalizeText(entry.metadata.title)
-  const normalizedAlbum = normalizeText(entry.metadata.album)
-  const normalizedPerformer = normalizeText(entry.metadata.performer)
+  const entryMeta = {
+    title: entry.metadata.title,
+    album: entry.metadata.album,
+    performer: entry.metadata.performer,
+  }
 
-  return Object.values(currentSongsById).find((song) => {
-    return (
-      normalizeText(song.title) === normalizedTitle &&
-      normalizeText(song.album) === normalizedAlbum &&
-      normalizeText(song.performer) === normalizedPerformer
-    )
-  })
+  const metadataKey = getSongMetadataKey(entryMeta)
+  if (metadataKey && currentSongsByMetadata[metadataKey]?.length === 1) {
+    return currentSongsByMetadata[metadataKey][0]
+  }
+
+  const titlePerformerKey = getSongTitlePerformerKey(entryMeta)
+  if (titlePerformerKey && currentSongsByTitlePerformer[titlePerformerKey]?.length === 1) {
+    return currentSongsByTitlePerformer[titlePerformerKey][0]
+  }
+
+  const titleKey = getSongTitleKey(entryMeta)
+  if (titleKey && currentSongsByTitle[titleKey]?.length === 1) {
+    return currentSongsByTitle[titleKey][0]
+  }
+
+  return currentSongsByMetadata[metadataKey]?.[0]
+    || currentSongsByTitlePerformer[titlePerformerKey]?.[0]
+    || currentSongsByTitle[titleKey]?.[0]
 }
 
 function searchCurrentPlaylist() {
@@ -182,13 +251,11 @@ function searchCurrentPlaylist() {
 }
 
 function preparePlaylistQueue(playlist: Playlist, query = '') {
-  const songs = playlist.songs
+  return playlist.songs
     .filter((entry) => entry.exists)
     .filter((entry) => songMatchesQuery(entry, query))
     .map((entry) => findSongInfoForPlaylistSong(entry))
     .filter((song): song is SongInfo => Boolean(song?.path))
-
-  return songs
 }
 
 function getAudioMimeType(path: string) {
@@ -207,15 +274,68 @@ function getAudioMimeType(path: string) {
   }
 }
 
-async function loadAudioSourceFromPath(path: string) {
-  try {
-    const fileData = await readBinaryFile(path)
-    const blob = new Blob([fileData], { type: getAudioMimeType(path) })
-    return URL.createObjectURL(blob)
-  } catch (error) {
-    console.error('Failed to load audio file', path, error)
-    return null
+function revokeCurrentAudioUrl() {
+  if (currentAudioObjectUrl) {
+    URL.revokeObjectURL(currentAudioObjectUrl)
+    currentAudioObjectUrl = null
   }
+}
+
+function revokeAudioUrl(url: string | null) {
+  if (!url) return
+  URL.revokeObjectURL(url)
+}
+
+function cacheAudioSource(path: string, url: string) {
+  if (audioSrcCache.has(path)) return
+  audioSrcCache.set(path, url)
+  const maxCacheSize = 3
+  while (audioSrcCache.size > maxCacheSize) {
+    const oldestPath = audioSrcCache.keys().next().value
+    if (!oldestPath) break
+    if (oldestPath !== playbackQueue[currentPlaybackIndex]?.path) {
+      revokeAudioUrl(audioSrcCache.get(oldestPath)!) 
+      audioSrcCache.delete(oldestPath)
+    } else {
+      break
+    }
+  }
+}
+
+async function loadAudioSourceFromPath(path: string) {
+  if (audioSrcCache.has(path)) {
+    return audioSrcCache.get(path) || null
+  }
+
+  if (audioLoadingPromises[path]) {
+    return audioLoadingPromises[path]
+  }
+
+  const promise = (async () => {
+    try {
+      const fileData = await readBinaryFile(path)
+      const blob = new Blob([fileData], { type: getAudioMimeType(path) })
+      const url = URL.createObjectURL(blob)
+      cacheAudioSource(path, url)
+      return url
+    } catch (error) {
+      console.error('Failed to load audio file', path, error)
+      return null
+    } finally {
+      delete audioLoadingPromises[path]
+    }
+  })()
+
+  audioLoadingPromises[path] = promise
+  return promise
+}
+
+async function preloadNextTrack() {
+  const nextIndex = currentPlaybackIndex + 1
+  if (nextIndex >= playbackQueue.length) return
+  const nextSong = playbackQueue[nextIndex]
+  if (!nextSong || audioSrcCache.has(nextSong.path)) return
+  await loadAudioSourceFromPath(nextSong.path)
 }
 
 async function playCurrentQueueTrack() {
@@ -227,79 +347,53 @@ async function playCurrentQueueTrack() {
   }
 
   const song = playbackQueue[currentPlaybackIndex]
-  const directSrc = encodeURI(`file://${song.path}`)
 
   if (audioPlayer) {
     audioPlayer.pause()
     audioPlayer.src = ''
   }
 
-  audioPlayer = new Audio(directSrc)
-  audioPlayer.autoplay = true
-  audioPlayer.onended = () => {
+  const audioSrc = await loadAudioSourceFromPath(song.path)
+  if (!audioSrc) {
+    console.warn('Unable to load track via Fs API', song.path)
     currentPlaybackIndex += 1
-    playCurrentQueueTrack()
-  }
-
-  let fallbackAttempted = false
-  const fallbackToBlob = async () => {
-    if (fallbackAttempted) return false
-    fallbackAttempted = true
-
-    const blobSrc = await loadAudioSourceFromPath(song.path)
-    if (!blobSrc) {
-      currentPlaybackIndex += 1
-      showToast(`Unable to load ${song.title ?? 'track'}, skipping`)
-      await playCurrentQueueTrack()
-      return false
-    }
-
-    if (audioPlayer) {
-      audioPlayer.pause()
-      audioPlayer.src = blobSrc
-    }
-
-    try {
-      await audioPlayer?.play()
-      return true
-    } catch (playError) {
-      console.error('Blob playback failed', playError)
-      currentPlaybackIndex += 1
-      showToast(`Playback failed for ${song.title ?? 'track'}, skipping to next`)
-      await playCurrentQueueTrack()
-      return false
-    }
-  }
-
-  let startedPlayback = false
-
-  audioPlayer.onerror = async () => {
-    await fallbackToBlob()
-  }
-
-  const playSource = async (source: string) => {
-    if (!audioPlayer) return false
-    audioPlayer.src = source
-    try {
-      await audioPlayer.play()
-      return true
-    } catch (playError) {
-      console.warn('Audio play() rejected for source', source, playError)
-      return false
-    }
-  }
-
-  startedPlayback = await playSource(directSrc)
-  if (!startedPlayback) {
-    console.warn('Direct file playback failed, trying blob fallback')
-    startedPlayback = await fallbackToBlob()
-  }
-
-  if (!startedPlayback) {
+    await playCurrentQueueTrack()
     return
   }
 
-  showToast(`Playing ${song.title ?? 'track'} (${currentPlaybackIndex + 1}/${playbackQueue.length})`)
+  currentAudioObjectUrl = audioSrc
+  if (!audioPlayer) {
+    audioPlayer = new Audio()
+    audioPlayer.preload = 'auto'
+  } else {
+    audioPlayer.pause()
+    audioPlayer.src = ''
+  }
+
+  audioPlayer.src = audioSrc
+  audioPlayer.autoplay = true
+  audioPlayer.onended = async () => {
+    currentPlaybackIndex += 1
+    await playCurrentQueueTrack()
+  }
+  audioPlayer.load()
+
+  const preloadPromise = preloadNextTrack()
+
+  try {
+    await audioPlayer.play()
+    showToast(`Playing ${song.title ?? 'track'} (${currentPlaybackIndex + 1}/${playbackQueue.length})`)
+  } catch (playError) {
+    console.error('Audio playback failed', playError)
+    showToast(`Playback failed for ${song.title ?? 'track'}, skipping`)
+    currentPlaybackIndex += 1
+    await playCurrentQueueTrack()
+    return
+  }
+
+  preloadPromise.catch((err) => {
+    console.warn('Next audio preload failed', err)
+  })
 }
 
 function sortSongsByQuality(songA: SongInfo, songB: SongInfo) {
@@ -343,8 +437,11 @@ function playPlaylistHighQuality() {
     return
   }
 
+  console.log('Starting playlist playback for', playlist.name)
   playbackQueue = preparePlaylistQueue(playlist, '')
   currentPlaybackIndex = 0
+  console.log('Playback queue built with', playbackQueue.length, 'tracks')
+  console.log('Playback queue paths', playbackQueue.map((song) => song.path))
 
   if (playbackQueue.length === 0) {
     showToast('No playable songs available')
@@ -460,6 +557,8 @@ function createSongTable(playlist: Playlist, query = '') {
   table.appendChild(thead)
 
   const tbody = document.createElement('tbody')
+  const fragment = document.createDocumentFragment()
+
   songs.forEach((entry) => {
     const row = document.createElement('tr')
 
@@ -472,48 +571,69 @@ function createSongTable(playlist: Playlist, query = '') {
     row.appendChild(coverCell)
 
     const titleCell = document.createElement('td')
-    titleCell.innerHTML = `<span>${entry.metadata.title ?? 'Unknown title'}</span>`
+    const titleSpan = document.createElement('span')
+    titleSpan.textContent = entry.metadata.title ?? 'Unknown title'
+    titleCell.appendChild(titleSpan)
     row.appendChild(titleCell)
 
     const timeCell = document.createElement('td')
-    timeCell.innerHTML = `<span>${entry.metadata.time ?? '–'}</span>`
+    const timeSpan = document.createElement('span')
+    timeSpan.textContent = entry.metadata.time ?? '–'
+    timeCell.appendChild(timeSpan)
     row.appendChild(timeCell)
 
     const performerCell = document.createElement('td')
-    performerCell.innerHTML = `<span>${entry.metadata.performer ?? '–'}</span>`
+    const performerSpan = document.createElement('span')
+    performerSpan.textContent = entry.metadata.performer ?? '–'
+    performerCell.appendChild(performerSpan)
     row.appendChild(performerCell)
 
     const albumCell = document.createElement('td')
-    albumCell.innerHTML = `<span>${entry.metadata.album ?? '–'}</span>`
+    const albumSpan = document.createElement('span')
+    albumSpan.textContent = entry.metadata.album ?? '–'
+    albumCell.appendChild(albumSpan)
     row.appendChild(albumCell)
 
     const releaseCell = document.createElement('td')
-    releaseCell.innerHTML = `<span>${entry.metadata.release ?? '–'}</span>`
+    const releaseSpan = document.createElement('span')
+    releaseSpan.textContent = entry.metadata.release ?? '–'
+    releaseCell.appendChild(releaseSpan)
     row.appendChild(releaseCell)
 
     const bitrateCell = document.createElement('td')
-    bitrateCell.innerHTML = `<span>${entry.metadata.bitrate ?? '–'}</span>`
+    const bitrateSpan = document.createElement('span')
+    bitrateSpan.textContent = entry.metadata.bitrate ?? '–'
+    bitrateCell.appendChild(bitrateSpan)
     row.appendChild(bitrateCell)
 
     const sampleCell = document.createElement('td')
-    sampleCell.innerHTML = `<span>${entry.metadata.sample ?? '–'}</span>`
+    const sampleSpan = document.createElement('span')
+    sampleSpan.textContent = entry.metadata.sample ?? '–'
+    sampleCell.appendChild(sampleSpan)
     row.appendChild(sampleCell)
 
     const depthCell = document.createElement('td')
-    depthCell.innerHTML = `<span>${entry.metadata.depth ?? '–'}</span>`
+    const depthSpan = document.createElement('span')
+    depthSpan.textContent = entry.metadata.depth ?? '–'
+    depthCell.appendChild(depthSpan)
     row.appendChild(depthCell)
 
     const formatCell = document.createElement('td')
-    formatCell.innerHTML = `<span>${entry.metadata.format ?? '–'}</span>`
+    const formatSpan = document.createElement('span')
+    formatSpan.textContent = entry.metadata.format ?? '–'
+    formatCell.appendChild(formatSpan)
     row.appendChild(formatCell)
 
     const ratingCell = document.createElement('td')
-    ratingCell.innerHTML = `<span>${entry.metadata.rating ?? '–'}</span>`
+    const ratingSpan = document.createElement('span')
+    ratingSpan.textContent = entry.metadata.rating ?? '–'
+    ratingCell.appendChild(ratingSpan)
     row.appendChild(ratingCell)
 
-    tbody.appendChild(row)
+    fragment.appendChild(row)
   })
 
+  tbody.appendChild(fragment)
   table.appendChild(tbody)
   container.appendChild(table)
   return container
@@ -557,15 +677,9 @@ function centerSongTableRegion(container: HTMLElement, table: HTMLTableElement) 
 
 function updateSongTable(playlist: Playlist, query = '') {
   const appEl = document.querySelector('#app')!
-  appEl.innerHTML = ''
+  appEl.textContent = ''
   const container = createSongTable(playlist, query)
   appEl.appendChild(container)
-  requestAnimationFrame(() => {
-    const table = container.querySelector('.song-table') as HTMLTableElement
-    if (table) {
-      addEmptyRowsIfNeeded(container, table)
-    }
-  })
 }
 
 function createPlaylistItem(playlist: Playlist, fixed = false): HTMLElement {
@@ -607,10 +721,7 @@ async function removePath(pathDisplayEl: HTMLElement, path: string) {
     selectedPaths.delete(path)
     pathDisplayEl.remove()
     currentPlaylists = result.playlists
-    currentSongsById = result.songs.reduce((map, song) => {
-      map[song.id] = song
-      return map
-    }, {} as Record<string, SongInfo>)
+    setCurrentSongs(result.songs)
     displayPlaylists(result.playlists)
     const selected = selectedPlaylistName || result.playlists.find((pl) => pl.name === 'All songs')?.name || result.playlists[0]?.name
     if (selected) {
@@ -633,18 +744,35 @@ async function loadSavedPaths() {
       createPathEntry(path)
     })
 
-    if (savedPaths.length > 0) {
-      const result = await invoke<ScanResult>('scan_music_files', { path: savedPaths[0] })
+    if (savedPaths.length === 0) {
+      return
+    }
+
+    let result: ScanResult | null = null
+    try {
+      result = await invoke<ScanResult>('load_saved_collection')
+      if (result.songs.length === 0) {
+        console.log('Saved collection is empty, falling back to rescan saved paths')
+        result = null
+      }
+    } catch (loadError) {
+      console.warn('Failed to load saved collection, rescanning saved paths instead', loadError)
+      result = null
+    }
+
+    if (!result) {
+      result = await invoke<ScanResult>('scan_music_files', { path: savedPaths[0] })
+    }
+
+    if (result) {
       currentPlaylists = result.playlists
-      currentSongsById = result.songs.reduce((map, song) => {
-        map[song.id] = song
-        return map
-      }, {} as Record<string, SongInfo>)
+      setCurrentSongs(result.songs)
       displayPlaylists(result.playlists)
       const defaultPlaylist = result.playlists.find((pl) => pl.name === 'All songs') || result.playlists[0]
       if (defaultPlaylist) {
         setSelectedPlaylist(defaultPlaylist.name)
       }
+      console.log('Loaded saved collection data from', result.saved_file)
     }
   } catch (error) {
     console.error('Failed to load saved paths:', error)
@@ -674,10 +802,7 @@ async function selectPath() {
         selectedPaths.add(selected)
         createPathEntry(selected)
         currentPlaylists = result.playlists
-        currentSongsById = result.songs.reduce((map, song) => {
-          map[song.id] = song
-          return map
-        }, {} as Record<string, SongInfo>)
+        setCurrentSongs(result.songs)
         displayPlaylists(result.playlists)
 
         console.log('Path added:', selected)

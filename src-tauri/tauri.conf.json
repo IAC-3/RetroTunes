@@ -29,6 +29,14 @@
         "minimize": true,
         "unmaximize": true,
         "unminimize": true
+      },
+      "fs": {
+        "all": false,
+        "scope": [
+          "$HOME/**",
+          "$APP/**"
+        ],
+        "readFile": true
       }
     },
     "bundle": {

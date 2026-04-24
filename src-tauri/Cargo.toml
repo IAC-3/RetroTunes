@@ -10,7 +10,7 @@ license = "MIT"
 tauri-build = { version = "1.5", features = [] }
 
 [dependencies]
-tauri = { version = "1.6", features = [ "dialog-open", "window-unminimize", "window-hide", "window-close", "window-unmaximize", "window-maximize", "window-minimize", "window-show", "shell-open"] }
+tauri = { version = "1.6", features = [ "fs-read-file", "dialog-open", "window-unminimize", "window-hide", "window-close", "window-unmaximize", "window-maximize", "window-minimize", "window-show", "shell-open"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.35", features = ["full"] }

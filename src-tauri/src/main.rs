@@ -1,13 +1,13 @@
 //Added by Marco Mattiuz
 use rsmediainfo::{MediaInfo, Track};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::panic;
 mod fsUtilities;
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SongInfo {
   id: String,
   path: String,
@@ -26,7 +26,7 @@ pub struct SongInfo {
   size_bytes: Option<u64>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct PlaylistSongMetadata {
   pub title: Option<String>,
   pub album: Option<String>,
@@ -41,14 +41,14 @@ pub struct PlaylistSongMetadata {
   pub size_bytes: Option<u64>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct PlaylistSong {
   pub id: String,
   pub metadata: PlaylistSongMetadata,
   pub exists: bool,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Playlist {
   pub name: String,
   pub description: String,
@@ -56,7 +56,7 @@ pub struct Playlist {
   pub songs: Vec<PlaylistSong>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct AllSongsCollection {
   #[serde(rename = "AllSongsCollection")]
   pub all_songs_collection: Vec<SongInfo>,
@@ -312,6 +312,36 @@ fn save_saved_paths(paths: &[String]) -> Result<(), String> {
   let paths_path = save_dir.join("paths.json");
   let paths_json = serde_json::to_string_pretty(&paths).map_err(|e| e.to_string())?;
   std::fs::write(&paths_path, paths_json).map_err(|e| e.to_string())
+}
+
+fn load_saved_collection_from_disk() -> Result<ScanResult, String> {
+  let save_dir = storage_base_dir()?;
+  let collections_dir = save_dir.join("collections");
+  let collection_path = collections_dir.join("AllSongsCollection.json");
+  let playlist_path = collections_dir.join("playlists").join("AllSong.json");
+
+  let songs: Vec<SongInfo> = if collection_path.exists() {
+    let raw = std::fs::read_to_string(&collection_path).map_err(|e| e.to_string())?;
+    let collection: AllSongsCollection = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    collection.all_songs_collection
+  } else {
+    Vec::new()
+  };
+
+  let playlist: Playlist = if playlist_path.exists() {
+    load_playlist()?
+  } else {
+    update_all_songs_playlist(&songs)?
+  };
+
+  let total = songs.len();
+  Ok(ScanResult {
+    songs,
+    playlists: vec![playlist],
+    total,
+    saved_file: collection_path.display().to_string(),
+    saved_playlist_file: playlist_path.display().to_string(),
+  })
 }
 
 fn scan_all_paths(paths: &[String]) -> Result<ScanResult, String> {
@@ -611,6 +641,15 @@ fn scan_music_files(path: String) -> Result<ScanResult, String> {
     "Internal scan error".to_string()
   })?
 }
+
+#[tauri::command]
+fn load_saved_collection() -> Result<ScanResult, String> {
+  panic::catch_unwind(|| load_saved_collection_from_disk())
+    .map_err(|panic_info| {
+      eprintln!("load_saved_collection panic: {:?}", panic_info);
+      "Internal load error".to_string()
+    })?
+}
 //-------------------------------------------------------
 
 
@@ -619,16 +658,10 @@ fn main() {
   let context = tauri::generate_context!();
 
   ensure_default_save_files().expect("failed to initialize save directories and files");
-  let saved_paths = load_saved_paths().unwrap_or_default();
-  if !saved_paths.is_empty() {
-    if let Err(err) = scan_all_paths(&saved_paths) {
-      eprintln!("failed to rescan saved paths on startup: {}", err);
-    }
-  }
 
   tauri::Builder::default()
     .menu(tauri::Menu::os_default(&context.package_info().name))
-    .invoke_handler(tauri::generate_handler![scan_music_files, get_saved_paths, remove_saved_path])
+    .invoke_handler(tauri::generate_handler![scan_music_files, get_saved_paths, remove_saved_path, load_saved_collection])
     .build(context)
     .expect("error while running tauri application")
     .run(|_app_handle, event| {
