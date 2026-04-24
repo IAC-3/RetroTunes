@@ -10,31 +10,24 @@
 
 .toast {
   position: fixed;
-  bottom: 32px;
+  bottom: 24px;
   left: 50%;
   transform: translateX(-50%) translateY(20px);
-  background-color: #0A064A;
+  background-color: rgba(0, 0, 0, 0.85);
   color: #fff;
-  padding: 14px 28px;
   font-family: 'Ithaca', serif;
-  font-size: 16px;
-  border: 2px solid #fff;
+  padding: 12px 18px;
+  border-radius: 10px;
   opacity: 0;
-  transition: opacity 0.3s ease, transform 0.3s ease;
-  z-index: 9999;
   pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 2000;
+  white-space: pre-wrap;
   text-align: center;
   max-width: 80vw;
 }
 
-.toast-detail {
-  display: block;
-  font-size: 13px;
-  margin-top: 6px;
-  opacity: 0.8;
-}
-
-.toast.toast-visible {
+.toast-visible {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
@@ -112,6 +105,34 @@ body {
   gap: 10px;
 }
 
+.playlists-container {
+  overflow-y: auto;
+  padding: 0 0 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.playlist-item {
+  background-color: #0A064A;
+  color: white;
+  padding: 12px 20px;
+  font-size: 15px;
+  font-family: 'Ithaca', serif;
+  width: 100%;
+  box-sizing: border-box;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.playlist-item:hover {
+  background-color: #12115f;
+}
+
 .path-display {
   background-color: #0A064A;
   color: white;
@@ -151,7 +172,8 @@ body {
   color: #FF0000;
 }
 
-.add-path-btn {
+.add-path-btn,
+.add-playlist-btn {
   background: none;
   border: none;
   color: #333232;
@@ -164,56 +186,19 @@ body {
   transition: color 0.2s;
 }
 
-.add-path-btn:hover {
+.add-path-btn:hover,
+.add-playlist-btn:hover {
   color: #555;
 }
 
-.toast {
-  position: fixed;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%) translateY(20px);
-  background-color: rgba(0, 0, 0, 0.85);
-  color: #fff;
-  font-family: 'Ithaca', serif;
-  padding: 12px 18px;
-  border-radius: 10px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s ease, transform 0.2s ease;
-  z-index: 2000;
-  white-space: nowrap;
+.add-path-btn {
+  margin-bottom: 10px;
 }
 
-.toast-visible {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
+.add-playlist-btn {
+  margin-bottom: 20px;
 }
-
-/* =====================================================
-   TOAST ADDED BY MARCO MATTIUZ
-   ===================================================== */
-
-.toast {
-  position: fixed;
-  bottom: 32px;
-  right: 32px;
-  background-color: #0A064A;
-  color: #fff;
-  font-family: 'Ithaca', serif;
-  font-size: 16px;
-  padding: 14px 24px;
-  border-left: 4px solid #B8CAD2;
-  z-index: 2000;
-  opacity: 0;
-  transform: translateY(12px);
-  transition: opacity 0.3s ease, transform 0.3s ease;
-  pointer-events: none;
-}
-
-.toast--visible {
-  opacity: 1;
-  transform: translateY(0);
+  color: #555;
 }
 
 /* =====================================================

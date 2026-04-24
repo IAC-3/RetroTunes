@@ -33,6 +33,30 @@ src-tauri/target/
 *.exe
 *.msi
 
+# Save data
+save/
+
+# Local scripts and helpers
+scripts/
+
+# Local config files
+.nvmrcOld
+FILE_SUMMARY.txt
+LEGGI-PRIMA.txt
+
+# Markdown docs
+00-SETUP-SUMMARY.md
+00-START-HERE.md
+ARCHITECTURE.md
+CONTRIBUTING.md
+DEVELOPMENT.md
+INDICE-FILE.md
+PROJECT_STRUCTURE.md
+QUICKSTART.md
+README-SETUP-FATTO.md
+SETUP_COMPLETE.md
+TROUBLESHOOTING.md
+
 # Development
 .tauri/
 
