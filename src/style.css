@@ -3,6 +3,47 @@
   padding: 0;
   box-sizing: border-box;
 }
+/* =================================================
+   Added by Marco Mattiuz
+   =================================================
+*/
+
+.toast {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background-color: #0A064A;
+  color: #fff;
+  padding: 14px 28px;
+  font-family: 'Ithaca', serif;
+  font-size: 16px;
+  border: 2px solid #fff;
+  opacity: 0;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  z-index: 9999;
+  pointer-events: none;
+  text-align: center;
+  max-width: 80vw;
+}
+
+.toast-detail {
+  display: block;
+  font-size: 13px;
+  margin-top: 6px;
+  opacity: 0.8;
+}
+
+.toast.toast-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/*===================================================*/
+
+
+
+
 
 html,
 body {
@@ -58,28 +99,56 @@ body {
   color: #333232;
   font-size: 18px;
   font-weight: bold;
-  margin-bottom: 15px;
   font-family: 'Ithaca', serif;
-  padding: 20px 20px 0 20px; /* Only top and horizontal padding */
+  padding: 20px 20px 0 20px;
+  margin-bottom: 10px;
 }
 
 .paths-container {
-  flex: 1;
   overflow-y: auto;
-  margin-bottom: 15px;
+  padding: 0 0 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .path-display {
   background-color: #0A064A;
   color: white;
   padding: 12px 20px;
-  margin-bottom: 10px;
   font-size: 15px;
   font-family: 'Ithaca', serif;
   width: 100%;
   box-sizing: border-box;
-  word-wrap: break-word;
-  white-space: pre-wrap;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.path-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remove-path-btn {
+  background: none;
+  border: none;
+  color: #CB000C;
+  font-size: 13px;
+  font-family: 'Ithaca', serif;
+  cursor: pointer;
+  padding: 0 5px;
+  white-space: nowrap;
+  transition: color 0.2s;
+  flex-shrink: 0;
+}
+
+.remove-path-btn:hover {
+  color: #FF0000;
 }
 
 .add-path-btn {
@@ -90,13 +159,61 @@ body {
   font-family: 'Ithaca', serif;
   cursor: pointer;
   text-align: left;
-  padding: 0 20px 20px 20px; /* Bottom and horizontal padding */
-  margin-top: auto; /* Push to bottom if needed */
+  padding: 0 20px;
+  margin-bottom: 15px;
   transition: color 0.2s;
 }
 
 .add-path-btn:hover {
   color: #555;
+}
+
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background-color: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  font-family: 'Ithaca', serif;
+  padding: 12px 18px;
+  border-radius: 10px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 2000;
+  white-space: nowrap;
+}
+
+.toast-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* =====================================================
+   TOAST ADDED BY MARCO MATTIUZ
+   ===================================================== */
+
+.toast {
+  position: fixed;
+  bottom: 32px;
+  right: 32px;
+  background-color: #0A064A;
+  color: #fff;
+  font-family: 'Ithaca', serif;
+  font-size: 16px;
+  padding: 14px 24px;
+  border-left: 4px solid #B8CAD2;
+  z-index: 2000;
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  pointer-events: none;
+}
+
+.toast--visible {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 /* =====================================================
