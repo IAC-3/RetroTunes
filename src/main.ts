@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/tauri'
+//import { invoke } from '@tauri-apps/api/tauri'
 import { open } from '@tauri-apps/api/dialog'
 
 let pathsContainerEl: HTMLElement;

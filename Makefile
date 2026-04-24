@@ -20,15 +20,15 @@ setup:
 
 install:
 	@echo "📦 Installando dipendenze..."
-	@bash -lc 'source "$$HOME/.cargo/env" && rustup toolchain install 1.80.0 && rustup default 1.80.0 && rustup component add rustfmt clippy && source "$$HOME/.nvm/nvm.sh" && nvm use && npm install'
+	@bash -lc 'source "$$HOME/.cargo/env" && rustup toolchain install 1.80.0 && rustup default 1.80.0 && rustup component add rustfmt clippy && source "$$HOME/.nvm/nvm.sh" && nvm install && nvm use && npm install'
 
 dev:
 	@echo "🚀 Avviando development server..."
-	@bash -lc 'source "$$HOME/.cargo/env" && source "$$HOME/.nvm/nvm.sh" && nvm use && npm run tauri dev'
+	@bash -lc 'source "$$HOME/.cargo/env" && source "$$HOME/.nvm/nvm.sh" && nvm install && nvm use && npm run tauri dev'
 
 build:
 	@echo "🔨 Compilando per production..."
-	@bash -lc 'source "$$HOME/.cargo/env" && source "$$HOME/.nvm/nvm.sh" && nvm use && npm run tauri build'
+	@bash -lc 'source "$$HOME/.cargo/env" && source "$$HOME/.nvm/nvm.sh" && nvm install && nvm use && npm run tauri build'
 
 clean:
 	@echo "🧹 Pulizia build artifacts..."
