@@ -59,6 +59,7 @@ TROUBLESHOOTING.md
 
 # Development
 .tauri/
+RetroTunes.code-workspace
 
 # OS
 Thumbs.db
