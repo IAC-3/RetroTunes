@@ -19,7 +19,8 @@ env_logger = "0.11"
 rsmediainfo = "0.2"
 
 walkdir = "2"
-
+rodio = "0.17"
+symphonia = { version = "0.5.5", default-features = false, features = ["all-formats", "all-codecs"] }
 
 [features]
 default = ["custom-protocol"]

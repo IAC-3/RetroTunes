@@ -11,7 +11,30 @@
   </head>
   <body>
     <!-- Top Bar -->
-    <div class="top-bar"></div>
+    <div class="top-bar">
+      <div class="top-bar-inner">
+        <div class="track-info-box">
+          <div class="track-meta">
+            <div class="track-title">No track selected</div>
+            <div class="track-performer">No performer</div>
+          </div>
+
+          <div class="time-bar-row">
+            <span class="time-label time-start">0:00</span>
+            <div class="time-bar-track">
+              <div class="time-bar-fill"></div>
+              <div class="time-bar-thumb"></div>
+            </div>
+            <span class="time-label time-end">0:00</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sync-overlay hidden">
+      <div class="spinner"></div>
+      <div class="sync-overlay-text">Syncing...</div>
+    </div>
 
     <!-- Playlist Bar -->
     <div class="playlist-bar">
@@ -22,6 +45,7 @@
           <div class="playlist-description">Playlist description appears here</div>
         </div>
         <div class="playlist-actions-column">
+          <button class="playlist-edit-button" disabled>EDIT</button>
           <button class="playlist-play-button">PLAY</button>
           <div class="playlist-search-wrapper">
             <div class="playlist-search-input-wrapper">
@@ -47,6 +71,20 @@
           </div>
         </div>
         <button class="add-playlist-btn">+ create new playlist</button>
+        <div class="sidebar-control-panel">
+          <div class="control-panel-title">Control Panel</div>
+          <div class="volume-panel">
+            <span class="volume-label">VOL</span>
+            <input class="volume-slider" type="range" min="0" max="1" step="0.01" value="0.75" />
+          </div>
+          <div class="control-panel-controls">
+            <button class="control-button shuffle-button" type="button" title="Shuffle">⇄</button>
+            <button class="control-button prev-button" type="button" title="Previous track">⏮</button>
+            <button class="control-button play-toggle-button" type="button" title="Play / Pause">▸</button>
+            <button class="control-button next-button" type="button" title="Next track">⏭</button>
+            <button class="control-button repeat-button" type="button" title="Repeat">⟲<span class="repeat-one-indicator hidden">1</span></button>
+          </div>
+        </div>
       </div>
     </aside>
 
@@ -62,6 +100,33 @@
     </div>
 
     <div class="toast"></div>
+
+    <div class="playlist-modal hidden">
+      <div class="playlist-modal-backdrop"></div>
+      <div class="playlist-modal-content">
+        <h2 class="playlist-modal-title">Create Playlist</h2>
+        <label>
+          Name
+          <input class="playlist-name-input" type="text" placeholder="Playlist name" />
+        </label>
+        <label>
+          Description
+          <textarea class="playlist-description-input" placeholder="Optional description"></textarea>
+        </label>
+        <label>
+          Cover image
+          <input class="playlist-cover-input" type="file" accept="image/*" />
+        </label>
+        <img class="playlist-cover-preview hidden" alt="Cover preview" />
+        <div class="playlist-modal-actions">
+          <button class="playlist-modal-save">Create</button>
+          <button class="playlist-modal-delete hidden" type="button">Delete</button>
+          <button class="playlist-modal-cancel" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="context-menu hidden"></div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>
