@@ -97,6 +97,11 @@
 
     <div class="bottom-bar">
       <div class="bottom-bar-content">0 items, 0 minutes, 0 MB</div>
+      <div class="bottom-bar-actions">
+        <button class="queue-toggle-button" type="button">Queue</button>
+        <button class="show-missing-toggle-button" type="button">Show missing</button>
+      </div>
+      <div class="queue-popup hidden"></div>
     </div>
 
     <div class="toast"></div>
@@ -105,19 +110,42 @@
       <div class="playlist-modal-backdrop"></div>
       <div class="playlist-modal-content">
         <h2 class="playlist-modal-title">Create Playlist</h2>
-        <label>
-          Name
-          <input class="playlist-name-input" type="text" placeholder="Playlist name" />
-        </label>
-        <label>
-          Description
-          <textarea class="playlist-description-input" placeholder="Optional description"></textarea>
-        </label>
-        <label>
-          Cover image
-          <input class="playlist-cover-input" type="file" accept="image/*" />
-        </label>
-        <img class="playlist-cover-preview hidden" alt="Cover preview" />
+        <div class="playlist-main-fields">
+          <label>
+            Name
+            <input class="playlist-name-input" type="text" placeholder="Playlist name" />
+          </label>
+          <label>
+            Description
+            <textarea class="playlist-description-input" placeholder="Optional description"></textarea>
+          </label>
+          <label>
+            Cover image
+            <input class="playlist-cover-input" type="file" accept="image/*" />
+          </label>
+          <img class="playlist-cover-preview hidden" alt="Cover preview" />
+          <button class="playlist-modal-add-songs-button" type="button">Add songs</button>
+        </div>
+        <div class="playlist-add-songs-section hidden">
+          <h3 class="playlist-add-songs-title">Add songs to playlist</h3>
+          <label>
+            Title
+            <input class="playlist-add-song-title" type="text" placeholder="Song title" />
+          </label>
+          <label>
+            Composer
+            <input class="playlist-add-song-composer" type="text" placeholder="Composer" />
+          </label>
+          <label>
+            Album
+            <input class="playlist-add-song-album" type="text" placeholder="Album" />
+          </label>
+          <div class="playlist-add-songs-controls">
+            <button class="playlist-add-song-submit" type="button">Add song</button>
+            <button class="playlist-add-songs-back" type="button">Back</button>
+          </div>
+          <div class="playlist-added-songs-count">0 songs added</div>
+        </div>
         <div class="playlist-modal-actions">
           <button class="playlist-modal-save">Create</button>
           <button class="playlist-modal-delete hidden" type="button">Delete</button>

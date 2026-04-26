@@ -15,10 +15,11 @@ use rodio::{buffer::SamplesBuffer, Decoder, OutputStream, OutputStreamHandle, Si
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error as SymphoniaError;
-use symphonia::core::formats::FormatOptions;
+use symphonia::core::formats::{FormatOptions, SeekMode, SeekTo};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+use symphonia::core::units::Time;
 use symphonia::default::{get_codecs, get_probe};
 use tauri::Manager;
 mod fsUtilities;
@@ -98,13 +99,12 @@ impl PlaybackEngine {
       } else {
         sink.append(decoder);
       }
-    } else {
+    } else if start_seconds == 0 {
       let source = decode_audio_file(path)?;
-      if start_seconds > 0 {
-        sink.append(source.skip_duration(Duration::from_secs(start_seconds)));
-      } else {
-        sink.append(source);
-      }
+      sink.append(source);
+    } else {
+      let source = decode_audio_file_at(path, start_seconds)?;
+      sink.append(source);
     }
 
     sink.play();
@@ -159,6 +159,71 @@ fn decode_audio_file(path: &str) -> Result<SamplesBuffer<f32>, String> {
     .map_err(|e| format!("Failed to create decoder: {}", e))?;
 
   let mut decoder = decoder;
+  let mut samples = Vec::new();
+  let mut sample_rate = 0;
+  let mut channels = 0;
+
+  loop {
+    match format.next_packet() {
+      Ok(packet) => {
+        if packet.track_id() != track_id {
+          continue;
+        }
+
+        let decoded = decoder.decode(&packet).map_err(|e| format!("Decode failed: {}", e))?;
+        let spec = *decoded.spec();
+
+        if sample_rate == 0 {
+          sample_rate = spec.rate;
+          channels = spec.channels.count() as u16;
+        }
+
+        let mut buffer = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
+        buffer.copy_interleaved_ref(decoded);
+        samples.extend_from_slice(buffer.samples());
+      }
+      Err(SymphoniaError::IoError(_)) => break,
+      Err(SymphoniaError::DecodeError(_)) => continue,
+      Err(SymphoniaError::ResetRequired) => {
+        decoder.reset();
+      }
+      Err(e) => return Err(format!("Audio decode error: {}", e)),
+    }
+  }
+
+  if sample_rate == 0 || channels == 0 {
+    return Err("No audio samples decoded".to_string());
+  }
+
+  Ok(SamplesBuffer::new(channels, sample_rate, samples))
+}
+
+fn decode_audio_file_at(path: &str, start_seconds: u64) -> Result<SamplesBuffer<f32>, String> {
+  let file = File::open(path).map_err(|e| e.to_string())?;
+  let mss = MediaSourceStream::new(Box::new(file), Default::default());
+  let mut hint = Hint::new();
+  if let Some(ext) = Path::new(path).extension().and_then(|ext| ext.to_str()) {
+    hint.with_extension(ext);
+  }
+
+  let probed = get_probe().format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+    .map_err(|e| format!("Failed to probe audio file: {}", e))?;
+  let mut format = probed.format;
+  let chosen_track = format.tracks().iter()
+    .find(|track| track.codec_params.codec != CODEC_TYPE_NULL)
+    .ok_or_else(|| "No audio track found".to_string())?;
+
+  let track_id = chosen_track.id;
+  let codec_params = chosen_track.codec_params.clone();
+
+  let time = Time::from(start_seconds);
+  format.seek(SeekMode::Coarse, SeekTo::Time { time, track_id: Some(track_id) })
+    .map_err(|e| format!("Failed to seek audio file: {}", e))?;
+
+  let mut decoder = get_codecs()
+    .make(&codec_params, &DecoderOptions::default())
+    .map_err(|e| format!("Failed to create decoder: {}", e))?;
+
   let mut samples = Vec::new();
   let mut sample_rate = 0;
   let mut channels = 0;
@@ -293,6 +358,28 @@ pub struct ResolvedPlaylist {
   pub cover: String,
   pub songs: Vec<ResolvedSong>,
   pub queue: Vec<ResolvedSong>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct SessionQueueSong {
+  pub lid: String,
+  pub title: Option<String>,
+  pub performer: Option<String>,
+  pub album: Option<String>,
+  pub path: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionState {
+  pub queue: Vec<SessionQueueSong>,
+  pub current_index: usize,
+  pub current_position_seconds: u64,
+  pub playlist_name: Option<String>,
+  pub repeat_mode: String,
+  pub shuffle_enabled: bool,
+  pub is_playing: bool,
+  pub is_paused: bool,
 }
 
 #[derive(Serialize)]
@@ -510,6 +597,41 @@ fn ensure_all_songs_playlist(playlists: &mut Vec<Playlist>, songs: &[SongInfo]) 
   }
 }
 
+fn song_info_from_playlist_song(entry: &PlaylistSong) -> SongInfo {
+  let mut info = SongInfo {
+    id: String::new(),
+    path: None,
+    scan: None,
+    exists: false,
+    cover: None,
+    title: entry.title.clone(),
+    time: None,
+    performer: entry.performer.clone(),
+    album: entry.album.clone(),
+    release: None,
+    bitrate: None,
+    sample: None,
+    depth: None,
+    format: None,
+    rating: None,
+    lyrics: None,
+    size_bytes: None,
+  };
+  info.id = make_song_id(&info);
+  info
+}
+
+fn add_missing_playlist_songs_to_collection(playlist: &Playlist, songs: &mut Vec<SongInfo>) {
+  let existing_ids: HashSet<String> = songs.iter().map(|song| song.id.clone()).collect();
+  for entry in playlist.songs.iter() {
+    let song_info = song_info_from_playlist_song(entry);
+    if existing_ids.contains(&song_info.id) {
+      continue;
+    }
+    songs.push(song_info);
+  }
+}
+
 fn playlist_filename(name: &str) -> String {
   name
     .split(|c: char| !c.is_ascii_alphanumeric())
@@ -632,6 +754,28 @@ fn save_collection(songs: &[SongInfo]) -> Result<(), String> {
   let collection_path = db_dir.join("songs.json");
   let collection_json = serde_json::to_string_pretty(&songs).map_err(|e| e.to_string())?;
   std::fs::write(&collection_path, collection_json).map_err(|e| e.to_string())
+}
+
+fn session_file_path() -> Result<std::path::PathBuf, String> {
+  Ok(storage_base_dir()?.join("session.json"))
+}
+
+fn save_session_to_disk(session: &SessionState) -> Result<(), String> {
+  let session_path = session_file_path()?;
+  let session_json = serde_json::to_string_pretty(session).map_err(|e| e.to_string())?;
+  std::fs::write(session_path, session_json).map_err(|e| e.to_string())
+}
+
+fn load_session_from_disk() -> Result<Option<SessionState>, String> {
+  let session_path = session_file_path()?;
+  if !session_path.exists() {
+    return Ok(None);
+  }
+
+  let raw = std::fs::read_to_string(&session_path).map_err(|e| e.to_string())?;
+  let session: SessionState = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+  std::fs::remove_file(&session_path).map_err(|e| e.to_string())?;
+  Ok(Some(session))
 }
 
 fn validate_existing_collection(mut songs: Vec<SongInfo>) -> Vec<SongInfo> {
@@ -1210,6 +1354,24 @@ fn set_playback_volume(volume: f32, state: tauri::State<AudioController>) -> Res
 }
 
 #[tauri::command]
+fn load_session() -> Result<Option<SessionState>, String> {
+  panic::catch_unwind(|| load_session_from_disk())
+    .map_err(|panic_info| {
+      eprintln!("load_session panic: {:?}", panic_info);
+      "Internal session load error".to_string()
+    })?
+}
+
+#[tauri::command]
+fn save_session(session: SessionState) -> Result<(), String> {
+  panic::catch_unwind(|| save_session_to_disk(&session))
+    .map_err(|panic_info| {
+      eprintln!("save_session panic: {:?}", panic_info);
+      "Internal session save error".to_string()
+    })?
+}
+
+#[tauri::command]
 fn save_playlist(playlist: Playlist, old_name: Option<String>) -> Result<ResolvedPlaylist, String> {
   panic::catch_unwind(|| {
     let mut playlists = load_all_playlists().unwrap_or_else(|_| Vec::new());
@@ -1241,9 +1403,13 @@ fn save_playlist(playlist: Playlist, old_name: Option<String>) -> Result<Resolve
       playlists.push(playlist.clone());
     }
 
+    let mut songs = load_saved_collection_songs()?;
+    add_missing_playlist_songs_to_collection(&playlist, &mut songs);
+    save_collection(&songs)?;
+
+    ensure_all_songs_playlist(&mut playlists, &songs);
     save_playlists_to_disk(&playlists)?;
 
-    let songs = load_saved_collection_songs()?;
     let validated_songs = validate_existing_collection(songs);
     let resolved = resolve_playlist(&playlist, &validated_songs);
     let save_dir = storage_base_dir()?;
@@ -1334,7 +1500,7 @@ fn main() {
   tauri::Builder::default()
     .manage(audio_controller)
     .menu(tauri::Menu::os_default(&context.package_info().name))
-    .invoke_handler(tauri::generate_handler![scan_music_files, get_saved_paths, remove_saved_path, load_saved_collection, sync_saved_paths, play_track, seek_playback, pause_playback, resume_playback, stop_playback, set_playback_volume, save_playlist, delete_playlist])
+    .invoke_handler(tauri::generate_handler![scan_music_files, get_saved_paths, remove_saved_path, load_saved_collection, sync_saved_paths, load_session, save_session, play_track, seek_playback, pause_playback, resume_playback, stop_playback, set_playback_volume, save_playlist, delete_playlist])
     .build(context)
     .expect("error while running tauri application")
     .run(|_app_handle, event| {

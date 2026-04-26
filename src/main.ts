@@ -15,6 +15,11 @@ let playButtonEl: HTMLButtonElement;
 let searchInputEl: HTMLInputElement;
 let searchButtonEl: HTMLElement;
 let bottomBarTextEl: HTMLElement;
+let queueToggleButtonEl: HTMLButtonElement
+let showMissingSongsToggleButtonEl: HTMLButtonElement
+let queuePopupEl: HTMLElement
+let isQueuePopupOpen = false
+let showMissingSongs = false
 let fixedPlaylistEl: HTMLElement;
 const selectedPaths = new Set<string>()
 let currentPlaylists: Playlist[] = []
@@ -27,6 +32,25 @@ let currentSongsByTitlePerformer: Record<string, SongInfo[]> = {}
 let currentSongsByTitle: Record<string, SongInfo[]> = {}
 interface QueuedSong extends SongInfo {
   lid: string
+}
+
+interface SessionQueueSong {
+  lid: string
+  title?: string
+  performer?: string
+  album?: string
+  path?: string
+}
+
+interface SessionState {
+  queue: SessionQueueSong[]
+  currentIndex: number
+  currentPositionSeconds: number
+  playlistName: string | null
+  repeatMode: 'off' | 'playlist' | 'single'
+  shuffleEnabled: boolean
+  isPlaying: boolean
+  isPaused: boolean
 }
 
 let playbackQueue: QueuedSong[] = []
@@ -51,6 +75,7 @@ let timeBarTrackEl: HTMLElement
 let timeBarFillEl: HTMLElement
 let timeBarThumbEl: HTMLElement
 let isTimeBarScrubbing = false
+let seekPlaybackFrame: number | null = null
 let playbackProgressInterval: number | null = null
 let playbackElapsedSeconds = 0
 let playbackDurationSeconds = 0
@@ -65,8 +90,18 @@ let playlistModalTitleEl: HTMLElement
 let playlistModalSaveButtonEl: HTMLButtonElement
 let playlistModalDeleteButtonEl: HTMLButtonElement
 let playlistEditButtonEl: HTMLButtonElement
+let playlistModalAddSongsButtonEl: HTMLButtonElement
+let playlistAddSongsSectionEl: HTMLElement
+let playlistAddSongsTitleEl: HTMLElement
+let playlistAddSongTitleInputEl: HTMLInputElement
+let playlistAddSongComposerInputEl: HTMLInputElement
+let playlistAddSongAlbumInputEl: HTMLInputElement
+let playlistAddSongSubmitButtonEl: HTMLButtonElement
+let playlistAddSongsBackButtonEl: HTMLButtonElement
+let playlistAddedSongsCountEl: HTMLElement
 let playlistModalMode: 'create' | 'edit' = 'create'
 let playlistOriginalName: string | null = null
+let playlistModalPendingSongs: PlaylistSong[] = []
 let contextMenuEl: HTMLElement
 let contextMenuPlaylistName: string | null = null
 
@@ -147,6 +182,7 @@ function hideSyncOverlay() {
 function openCreatePlaylistModal() {
   playlistModalMode = 'create'
   playlistOriginalName = null
+  playlistModalPendingSongs = []
   playlistModalTitleEl.textContent = 'Create Playlist'
   playlistModalSaveButtonEl.textContent = 'Create'
   playlistModalDeleteButtonEl.classList.add('hidden')
@@ -156,6 +192,11 @@ function openCreatePlaylistModal() {
   playlistCoverPreviewEl.src = ''
   playlistCoverPreviewEl.classList.add('hidden')
   playlistCoverInputEl.value = ''
+  playlistAddSongTitleInputEl.value = ''
+  playlistAddSongComposerInputEl.value = ''
+  playlistAddSongAlbumInputEl.value = ''
+  updateAddedSongsCount()
+  closeAddSongsSection()
   playlistModalEl.classList.remove('hidden')
 }
 
@@ -173,6 +214,7 @@ function openEditPlaylistModal() {
 
   playlistModalMode = 'edit'
   playlistOriginalName = playlist.name
+  playlistModalPendingSongs = []
   playlistModalTitleEl.textContent = 'Edit Playlist'
   playlistModalSaveButtonEl.textContent = 'Save'
   playlistModalDeleteButtonEl.classList.remove('hidden')
@@ -188,11 +230,88 @@ function openEditPlaylistModal() {
     playlistCoverPreviewEl.classList.add('hidden')
   }
   playlistCoverInputEl.value = ''
+  playlistAddSongTitleInputEl.value = ''
+  playlistAddSongComposerInputEl.value = ''
+  playlistAddSongAlbumInputEl.value = ''
+  updateAddedSongsCount()
+  closeAddSongsSection()
   playlistModalEl.classList.remove('hidden')
 }
 
 function closeCreatePlaylistModal() {
   playlistModalEl.classList.add('hidden')
+}
+
+function sanitizePlaylistIdPart(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+function generatePlaylistSongLid(title: string, composer: string, album: string) {
+  const base = [title, composer, album]
+    .map((value) => sanitizePlaylistIdPart(value))
+    .filter(Boolean)
+    .join('-')
+    .slice(0, 120)
+
+  let lid = base || `song-${Date.now()}`
+  const existingIds = new Set(
+    currentPlaylists.flatMap((pl) => pl.songs.map((song) => song.lid))
+      .concat(playlistModalPendingSongs.map((song) => song.lid))
+  )
+  let suffix = 1
+  while (existingIds.has(lid)) {
+    suffix += 1
+    lid = `${base}-${suffix}`
+  }
+  return lid
+}
+
+function updateAddedSongsCount() {
+  const count = playlistModalPendingSongs.length
+  playlistAddedSongsCountEl.textContent = `${count} song${count === 1 ? '' : 's'} added`
+}
+
+function openAddSongsSection() {
+  const playlistName = playlistNameInputEl.value.trim() || 'new playlist'
+  playlistAddSongsTitleEl.textContent = `Add songs to "${playlistName}"`
+  playlistAddSongsSectionEl.classList.remove('hidden')
+  document.querySelector('.playlist-main-fields')?.classList.add('hidden')
+  updateAddedSongsCount()
+}
+
+function closeAddSongsSection() {
+  playlistAddSongsSectionEl.classList.add('hidden')
+  document.querySelector('.playlist-main-fields')?.classList.remove('hidden')
+}
+
+function addSongToPlaylistModal() {
+  const title = playlistAddSongTitleInputEl.value.trim()
+  const composer = playlistAddSongComposerInputEl.value.trim()
+  const album = playlistAddSongAlbumInputEl.value.trim()
+
+  if (!title || !composer || !album) {
+    showToast('Fill Title, Composer and Album')
+    return
+  }
+
+  const lid = generatePlaylistSongLid(title, composer, album)
+  const newEntry: PlaylistSong = {
+    lid,
+    title,
+    performer: composer,
+    album,
+  }
+
+  playlistModalPendingSongs.push(newEntry)
+  playlistAddSongTitleInputEl.value = ''
+  playlistAddSongComposerInputEl.value = ''
+  playlistAddSongAlbumInputEl.value = ''
+  updateAddedSongsCount()
+  showToast(`Added song ${title}`)
 }
 
 function setPlaylistCoverPreview(dataUrl: string) {
@@ -248,7 +367,9 @@ async function savePlaylistModal() {
     name,
     description,
     cover: playlistCoverData || 'assets/AllSongs/CoverArt/cover.png',
-    songs: existingSongs,
+    songs: playlistModalMode === 'edit'
+      ? [...existingSongs, ...playlistModalPendingSongs]
+      : [...playlistModalPendingSongs],
   }
 
   try {
@@ -337,8 +458,38 @@ function openContextMenu(event: MouseEvent, playlistName: string, entry: Playlis
 
   const label = document.createElement('div')
   label.className = 'context-menu-label'
-  label.textContent = 'Add to playlist'
+  label.textContent = 'Track actions'
   contextMenuEl.appendChild(label)
+
+  const playItem = document.createElement('div')
+  playItem.className = 'context-menu-item'
+  playItem.textContent = 'Play this song now'
+  playItem.addEventListener('click', async () => {
+    closeContextMenu()
+    await playPlaylistSongDirectly(entry, playlistName)
+  })
+  contextMenuEl.appendChild(playItem)
+
+  const queueItem = document.createElement('div')
+  queueItem.className = 'context-menu-item'
+  queueItem.textContent = 'Add to queue next'
+  queueItem.addEventListener('click', () => {
+    closeContextMenu()
+    insertPlaylistSongNext(entry)
+    renderQueuePopup()
+  })
+  contextMenuEl.appendChild(queueItem)
+
+  if (playlistName !== 'All songs') {
+    const removeItem = document.createElement('div')
+    removeItem.className = 'context-menu-item remove-action'
+    removeItem.textContent = 'Remove from playlist'
+    removeItem.addEventListener('click', async () => {
+      closeContextMenu()
+      await removeSongFromPlaylist(entry, playlistName)
+    })
+    contextMenuEl.appendChild(removeItem)
+  }
 
   const destinationPlaylists = currentPlaylists.filter((pl) => pl.name !== playlistName && pl.name !== 'All songs')
   if (destinationPlaylists.length === 0) {
@@ -347,6 +498,11 @@ function openContextMenu(event: MouseEvent, playlistName: string, entry: Playlis
     emptyItem.textContent = 'No playlists available'
     contextMenuEl.appendChild(emptyItem)
   } else {
+    const playlistLabel = document.createElement('div')
+    playlistLabel.className = 'context-menu-label'
+    playlistLabel.textContent = 'Add to playlist'
+    contextMenuEl.appendChild(playlistLabel)
+
     destinationPlaylists.forEach((target) => {
       const item = document.createElement('div')
       item.className = 'context-menu-item'
@@ -390,6 +546,34 @@ async function addSongToPlaylist(entry: PlaylistSong, targetPlaylistName: string
   } catch (error) {
     console.error('Add song error:', error)
     showToast('Unable to add song to playlist')
+  }
+}
+
+async function removeSongFromPlaylist(entry: PlaylistSong, playlistName: string) {
+  const playlist = currentPlaylists.find((pl) => pl.name === playlistName)
+  if (!playlist) {
+    showToast('Playlist not found')
+    return
+  }
+
+  const updatedPlaylist: Playlist = {
+    ...playlist,
+    songs: playlist.songs.filter((song) => song.lid !== entry.lid),
+  }
+
+  try {
+    const result = await invoke<ResolvedPlaylist>('save_playlist', { playlist: updatedPlaylist })
+    currentPlaylists = currentPlaylists.map((pl) => pl.name === playlistName ? updatedPlaylist : pl)
+    currentResolvedPlaylists[result.name] = result
+    if (selectedPlaylistName === playlistName) {
+      updateSongTable(updatedPlaylist, currentSearchQuery)
+      updatePlaylistBar(updatedPlaylist)
+      updateBottomBar(updatedPlaylist)
+    }
+    showToast(`Removed from ${playlistName}`)
+  } catch (error) {
+    console.error('Remove song error:', error)
+    showToast('Unable to remove song from playlist')
   }
 }
 
@@ -527,6 +711,30 @@ function buildQueuedSong(song: SongInfo, lid: string): QueuedSong {
   }
 }
 
+function buildSessionQueueSong(song: QueuedSong): SessionQueueSong {
+  return {
+    lid: song.lid,
+    title: song.title,
+    performer: song.performer,
+    album: song.album,
+    path: song.path,
+  }
+}
+
+function resolveSessionSongToQueuedSong(entry: SessionQueueSong): QueuedSong | null {
+  const playlistSong: PlaylistSong = {
+    lid: entry.lid,
+    title: entry.title,
+    performer: entry.performer,
+    album: entry.album,
+  }
+  const resolved = findSongInfoForPlaylistSong(playlistSong)
+  if (!resolved || !resolved.path || !resolved.exists) {
+    return null
+  }
+  return buildQueuedSong(resolved, entry.lid)
+}
+
 function findSongInfoForPlaylistSong(entry: PlaylistSong) {
   const direct = currentSongsById[entry.lid]
   if (direct) {
@@ -557,6 +765,127 @@ function findSongInfoForPlaylistSong(entry: PlaylistSong) {
   return currentSongsByMetadata[metadataKey]?.[0]
     || currentSongsByTitlePerformer[titlePerformerKey]?.[0]
     || currentSongsByTitle[titleKey]?.[0]
+}
+
+function savePlaybackSession(): Promise<void> {
+  const session: SessionState = {
+    queue: playbackQueue.map(buildSessionQueueSong),
+    currentIndex: currentPlaybackIndex,
+    currentPositionSeconds: playbackElapsedSeconds,
+    playlistName: currentPlaybackPlaylistName,
+    repeatMode,
+    shuffleEnabled,
+    isPlaying,
+    isPaused,
+  }
+  return invoke('save_session', { session })
+    .then(() => undefined)
+    .catch((error) => {
+      console.error('Failed to save session:', error)
+    })
+}
+
+async function loadSavedSession() {
+  try {
+    const session = await invoke<SessionState | null>('load_session')
+    if (!session) {
+      return
+    }
+
+    const restoredQueue = session.queue
+      .map(resolveSessionSongToQueuedSong)
+      .filter((song): song is QueuedSong => Boolean(song))
+
+    const oldCurrent = session.queue[session.currentIndex]
+    const currentIsMissing = oldCurrent && !restoredQueue.some((song) => song.lid === oldCurrent.lid)
+    playbackQueue = restoredQueue
+    currentPlaybackPlaylistName = session.playlistName || currentPlaybackPlaylistName
+    currentPlaybackIndex = Math.min(session.currentIndex, playbackQueue.length - 1)
+    if (currentPlaybackIndex < 0) {
+      currentPlaybackIndex = 0
+    }
+    playbackElapsedSeconds = session.currentPositionSeconds
+    repeatMode = session.repeatMode
+    shuffleEnabled = session.shuffleEnabled
+    isPlaying = false
+    isPaused = true
+
+    if (currentIsMissing && playbackQueue.length > 0) {
+      currentPlaybackIndex = Math.min(currentPlaybackIndex, playbackQueue.length - 1)
+      playbackElapsedSeconds = 0
+      showToast('Saved track was missing; moved to next playable song.')
+    }
+
+    if (playbackQueue.length > 0) {
+      const song = playbackQueue[currentPlaybackIndex]
+      setTrackInfo(song)
+      const durationSeconds = parseDurationToSeconds(song.time)
+      if (durationSeconds > 0) {
+        updatePlaybackProgress(Math.min(playbackElapsedSeconds, durationSeconds), durationSeconds)
+      }
+      updateControlPanelState()
+      renderQueuePopup()
+      updatePlayingSongHighlight()
+    }
+  } catch (error) {
+    console.error('Could not restore saved session:', error)
+  }
+}
+
+function resolvePlaylistSongToQueuedSong(entry: PlaylistSong): QueuedSong | null {
+  const song = findSongInfoForPlaylistSong(entry)
+  if (!song || !song.path) return null
+  return buildQueuedSong(song, entry.lid)
+}
+
+function buildPlaylistQueueFromEntry(playlistName: string, entry: PlaylistSong): QueuedSong[] {
+  const playlist = currentPlaylists.find((pl) => pl.name === playlistName)
+  if (!playlist) return []
+
+  const queue = preparePlaylistQueue(playlist, '')
+  const entryIndex = queue.findIndex((song) => song.lid === entry.lid)
+  if (entryIndex <= 0) return queue
+
+  return [...queue.slice(entryIndex), ...queue.slice(0, entryIndex)]
+}
+
+async function playPlaylistSongDirectly(entry: PlaylistSong, playlistName: string) {
+  const queue = buildPlaylistQueueFromEntry(playlistName, entry)
+  if (queue.length === 0) {
+    showToast('Cannot play missing song')
+    return
+  }
+
+  playbackQueue = queue
+  currentPlaybackPlaylistName = playlistName
+  currentPlaybackIndex = 0
+  isPlaying = true
+  isPaused = false
+  updatePlayingSongHighlight()
+  updateControlPanelState()
+  renderQueuePopup()
+  await playCurrentQueueTrack()
+}
+
+function insertPlaylistSongNext(entry: PlaylistSong) {
+  const queuedSong = resolvePlaylistSongToQueuedSong(entry)
+  if (!queuedSong) {
+    showToast('Cannot add missing song to queue')
+    return
+  }
+
+  if (playbackQueue.length === 0) {
+    playbackQueue = [queuedSong]
+    currentPlaybackIndex = 0
+    currentPlaybackPlaylistName = selectedPlaylistName || currentPlaybackPlaylistName
+    showToast('Added song to queue')
+    renderQueuePopup()
+    return
+  }
+
+  const insertIndex = Math.min(currentPlaybackIndex + 1, playbackQueue.length)
+  playbackQueue.splice(insertIndex, 0, queuedSong)
+  showToast('Added next in queue')
 }
 
 function searchCurrentPlaylist() {
@@ -610,13 +939,17 @@ async function playCurrentQueueTrack() {
     setTrackInfo(song)
     const durationSeconds = parseDurationToSeconds(song.time)
     if (durationSeconds > 0) {
-      startPlaybackProgress(durationSeconds)
+      if (playbackElapsedSeconds > 0) {
+        await invoke('seek_playback', { seconds: playbackElapsedSeconds })
+      }
+      startPlaybackProgress(durationSeconds, playbackElapsedSeconds)
     } else {
       clearPlaybackProgressInterval()
       updatePlaybackProgress(0, 0)
     }
     updateControlPanelState()
     updatePlayingSongHighlight()
+    renderQueuePopup()
     showToast(`Playing ${song.title ?? 'track'} (${currentPlaybackIndex + 1}/${playbackQueue.length})`)
   } catch (playError) {
     console.error('Audio playback failed', playError)
@@ -692,7 +1025,7 @@ function getHighestQualityPlaylistSongs(playlist: Playlist) {
 
 function playPlaylistHighQuality() {
   if (!selectedPlaylistName) return
-  if (!playButtonEl || playButtonEl.disabled) return
+  if (!playButtonEl) return
 
   const playlist = currentPlaylists.find((pl) => pl.name === selectedPlaylistName)
   if (!playlist) {
@@ -719,8 +1052,6 @@ function playPlaylistHighQuality() {
   isPaused = false
   updatePlayingSongHighlight()
   updateControlPanelState()
-  playButtonEl.disabled = true
-  playButtonEl.classList.add('playing')
   showToast('Starting playback...')
   playCurrentQueueTrack()
 }
@@ -770,12 +1101,12 @@ function togglePlayPause() {
     return
   }
 
-  if (isPlaying && isPaused) {
+  if (playbackQueue.length > 0 && (!isPlaying || isPaused)) {
     resumePlayback()
     return
   }
 
-  playPlaylistHighQuality()
+  showToast('Nessuna riproduzione attiva')
 }
 
 function pausePlayback() {
@@ -790,6 +1121,10 @@ function pausePlayback() {
 
 function resumePlayback() {
   if (!isPlaying) {
+    if (playbackQueue.length > 0) {
+      playCurrentQueueTrack()
+      return
+    }
     playPlaylistHighQuality()
     return
   }
@@ -865,7 +1200,8 @@ function updateControlPanelState() {
     playToggleButtonEl.textContent = isPlaying && !isPaused ? '❚❚' : '▶'
   }
   if (playButtonEl) {
-    playButtonEl.textContent = isPlaying && !isPaused ? 'PAUSE' : 'PLAY'
+    const isActivePlaylist = isPlaying && !isPaused && currentPlaybackPlaylistName === selectedPlaylistName
+    playButtonEl.classList.toggle('playing', isActivePlaylist)
   }
   if (volumeSliderEl) {
     volumeSliderEl.value = String(currentVolume)
@@ -924,6 +1260,44 @@ function seekPlaybackProgressToPointer(event: PointerEvent) {
   updatePlaybackProgress(playbackElapsedSeconds, playbackDurationSeconds)
 }
 
+function performSeekPlayback() {
+  if (!isPlaying) {
+    return
+  }
+
+  const seekSeconds = playbackElapsedSeconds
+  const shouldStayPaused = isPaused
+
+  invoke('seek_playback', { seconds: seekSeconds })
+    .then(() => {
+      if (shouldStayPaused) {
+        invoke('pause_playback').catch((error) => console.error('Pause after seek failed', error))
+      }
+    })
+    .catch((error) => {
+      console.error('Seek playback failed', error)
+    })
+}
+
+function scheduleSeekPlayback() {
+  if (seekPlaybackFrame !== null) {
+    return
+  }
+
+  seekPlaybackFrame = window.requestAnimationFrame(() => {
+    seekPlaybackFrame = null
+    performSeekPlayback()
+  })
+}
+
+function flushSeekPlayback() {
+  if (seekPlaybackFrame !== null) {
+    window.cancelAnimationFrame(seekPlaybackFrame)
+    seekPlaybackFrame = null
+  }
+  performSeekPlayback()
+}
+
 function handleTimeBarPointerDown(event: PointerEvent) {
   if (!timeBarTrackEl || playbackDurationSeconds <= 0) {
     return
@@ -934,6 +1308,9 @@ function handleTimeBarPointerDown(event: PointerEvent) {
   clearPlaybackProgressInterval()
   timeBarTrackEl.setPointerCapture(event.pointerId)
   seekPlaybackProgressToPointer(event)
+  if (isPlaying) {
+    scheduleSeekPlayback()
+  }
 }
 
 function handleTimeBarPointerMove(event: PointerEvent) {
@@ -942,6 +1319,9 @@ function handleTimeBarPointerMove(event: PointerEvent) {
   }
 
   seekPlaybackProgressToPointer(event)
+  if (isPlaying) {
+    scheduleSeekPlayback()
+  }
 }
 
 function handleTimeBarPointerUp(event: PointerEvent) {
@@ -957,18 +1337,10 @@ function handleTimeBarPointerUp(event: PointerEvent) {
   seekPlaybackProgressToPointer(event)
 
   if (isPlaying) {
-    const shouldStayPaused = isPaused
-    invoke('seek_playback', { seconds: playbackElapsedSeconds })
-      .then(() => {
-        if (shouldStayPaused) {
-          invoke('pause_playback').catch((error) => console.error('Pause after seek failed', error))
-        } else if (playbackDurationSeconds > 0) {
-          startPlaybackProgress(playbackDurationSeconds, playbackElapsedSeconds)
-        }
-      })
-      .catch((error) => {
-        console.error('Seek playback failed', error)
-      })
+    flushSeekPlayback()
+    if (playbackDurationSeconds > 0 && !isPaused) {
+      startPlaybackProgress(playbackDurationSeconds, playbackElapsedSeconds)
+    }
   }
 }
 
@@ -1064,6 +1436,63 @@ function updateBottomBar(playlist: Playlist) {
   }, 0)
 
   bottomBarTextEl.textContent = `${itemCount} items, ${totalMinutes} minutes, ${formatBytesToMB(totalMB)} MB`
+  renderQueuePopup()
+}
+
+function toggleQueuePopup() {
+  isQueuePopupOpen = !isQueuePopupOpen
+  queuePopupEl.classList.toggle('hidden', !isQueuePopupOpen)
+  if (isQueuePopupOpen) {
+    renderQueuePopup()
+  }
+}
+
+function toggleShowMissingSongs() {
+  showMissingSongs = !showMissingSongs
+  showMissingSongsToggleButtonEl.classList.toggle('active', showMissingSongs)
+  showMissingSongsToggleButtonEl.textContent = showMissingSongs ? 'Hide missing' : 'Show missing'
+  if (selectedPlaylistName) {
+    const playlist = currentPlaylists.find((pl) => pl.name === selectedPlaylistName)
+    if (playlist) {
+      updateSongTable(playlist, currentSearchQuery)
+    }
+  }
+}
+
+function closeQueuePopup() {
+  if (isQueuePopupOpen) {
+    queuePopupEl.classList.add('hidden')
+    isQueuePopupOpen = false
+  }
+}
+
+function renderQueuePopup() {
+  queuePopupEl.textContent = ''
+  const title = document.createElement('div')
+  title.className = 'queue-popup-title'
+  title.textContent = currentPlaybackPlaylistName
+    ? `Queue — ${currentPlaybackPlaylistName}`
+    : 'Current queue'
+  queuePopupEl.appendChild(title)
+
+  if (playbackQueue.length === 0) {
+    const empty = document.createElement('div')
+    empty.className = 'queue-popup-item'
+    empty.textContent = 'Queue is empty'
+    queuePopupEl.appendChild(empty)
+    return
+  }
+
+  playbackQueue.forEach((song, index) => {
+    const item = document.createElement('div')
+    item.className = 'queue-popup-item'
+    if (index === currentPlaybackIndex) {
+      item.classList.add('current')
+    }
+    const titleText = song.title || song.path || `Track ${index + 1}`
+    item.textContent = `${index + 1}. ${titleText}`
+    queuePopupEl.appendChild(item)
+  })
 }
 
 function setSelectedPlaylist(name: string) {
@@ -1100,6 +1529,7 @@ function setSelectedPlaylist(name: string) {
     updatePlaylistBar(playlist)
     updateBottomBar(playlist)
     updateSongTable(playlist, currentSearchQuery)
+    updateControlPanelState()
   }
 }
 
@@ -1110,6 +1540,11 @@ function createSongTable(playlist: Playlist, query = '') {
   const resolvedPlaylist = currentResolvedPlaylists[playlist.name]
   const songs = playlist.songs
     .filter((entry) => songMatchesQuery(entry, query))
+    .filter((entry) => {
+      const resolvedSong = resolvedPlaylist?.songs.find((song) => song.lid === entry.lid) || findSongInfoForPlaylistSong(entry)
+      const isMissing = !resolvedSong || !resolvedSong.exists
+      return showMissingSongs ? true : !isMissing
+    })
 
   if (songs.length === 0) {
     const placeholder = document.createElement('div')
@@ -1485,10 +1920,22 @@ window.addEventListener('DOMContentLoaded', async () => {
   playlistCoverPreviewEl = document.querySelector('.playlist-cover-preview') as HTMLImageElement
   playlistModalSaveButtonEl = document.querySelector('.playlist-modal-save') as HTMLButtonElement
   playlistModalDeleteButtonEl = document.querySelector('.playlist-modal-delete') as HTMLButtonElement
+  playlistModalAddSongsButtonEl = document.querySelector('.playlist-modal-add-songs-button') as HTMLButtonElement
+  playlistAddSongsSectionEl = document.querySelector('.playlist-add-songs-section') as HTMLElement
+  playlistAddSongsTitleEl = document.querySelector('.playlist-add-songs-title') as HTMLElement
+  playlistAddSongTitleInputEl = document.querySelector('.playlist-add-song-title') as HTMLInputElement
+  playlistAddSongComposerInputEl = document.querySelector('.playlist-add-song-composer') as HTMLInputElement
+  playlistAddSongAlbumInputEl = document.querySelector('.playlist-add-song-album') as HTMLInputElement
+  playlistAddSongSubmitButtonEl = document.querySelector('.playlist-add-song-submit') as HTMLButtonElement
+  playlistAddSongsBackButtonEl = document.querySelector('.playlist-add-songs-back') as HTMLButtonElement
+  playlistAddedSongsCountEl = document.querySelector('.playlist-added-songs-count') as HTMLElement
   playlistCoverEl = document.querySelector('.playlist-cover') as HTMLImageElement
   playlistTitleEl = document.querySelector('.playlist-title')!
   playlistDescriptionEl = document.querySelector('.playlist-description')!
   bottomBarTextEl = document.querySelector('.bottom-bar-content')!
+  queueToggleButtonEl = document.querySelector('.queue-toggle-button') as HTMLButtonElement
+  showMissingSongsToggleButtonEl = document.querySelector('.show-missing-toggle-button') as HTMLButtonElement
+  queuePopupEl = document.querySelector('.queue-popup') as HTMLElement
 
   contextMenuEl = document.querySelector('.context-menu') as HTMLElement
 
@@ -1520,6 +1967,18 @@ window.addEventListener('DOMContentLoaded', async () => {
     openEditPlaylistModal()
   })
 
+  playlistModalAddSongsButtonEl.addEventListener('click', () => {
+    openAddSongsSection()
+  })
+
+  playlistAddSongSubmitButtonEl.addEventListener('click', () => {
+    addSongToPlaylistModal()
+  })
+
+  playlistAddSongsBackButtonEl.addEventListener('click', () => {
+    closeAddSongsSection()
+  })
+
   playlistCoverInputEl.addEventListener('change', handleCoverFileChange)
 
   playlistModalSaveButtonEl.addEventListener('click', savePlaylistModal)
@@ -1529,12 +1988,24 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (!contextMenuEl.contains(event.target as Node)) {
       closeContextMenu()
     }
+    if (!queuePopupEl.contains(event.target as Node) && event.target !== queueToggleButtonEl && event.target !== showMissingSongsToggleButtonEl) {
+      closeQueuePopup()
+    }
   })
 
   document.addEventListener('scroll', () => closeContextMenu())
 
   playButtonEl.addEventListener('click', () => {
-    togglePlayPause()
+    playPlaylistHighQuality()
+  })
+
+  queueToggleButtonEl.addEventListener('click', (event) => {
+    event.stopPropagation()
+    toggleQueuePopup()
+  })
+
+  showMissingSongsToggleButtonEl.addEventListener('click', () => {
+    toggleShowMissingSongs()
   })
 
   shuffleButtonEl = document.querySelector('.shuffle-button') as HTMLButtonElement
@@ -1637,6 +2108,18 @@ window.addEventListener('DOMContentLoaded', async () => {
   const createPlaylistCancel = document.querySelector('.playlist-modal-cancel') as HTMLButtonElement
   createPlaylistCancel.addEventListener('click', closeCreatePlaylistModal)
 
+  window.addEventListener('beforeunload', async (event) => {
+    const leave = confirm('Are you sure you want to leave?')
+    if (!leave) {
+      event.preventDefault()
+      event.returnValue = ''
+      return
+    }
+
+    await savePlaybackSession()
+  })
+
   await loadSavedPaths()
+  await loadSavedSession()
   console.log('RetroTunes app initialized')
 })
