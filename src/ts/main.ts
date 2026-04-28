@@ -1,9 +1,11 @@
 import { invoke } from '@tauri-apps/api/tauri'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/api/dialog'
+import { appWindow } from '@tauri-apps/api/window'
 import { readBinaryFile } from '@tauri-apps/api/fs'
 
 let pathsContainerEl: HTMLElement;
+let allowBeforeUnload = false;
 let addPathBtnEl: HTMLElement;
 let playlistsContainerEl: HTMLElement;
 let addPlaylistBtnEl: HTMLElement;
@@ -35,6 +37,7 @@ interface QueuedSong extends SongInfo {
 }
 
 interface SessionQueueSong {
+  id?: string
   lid: string
   title?: string
   performer?: string
@@ -47,6 +50,7 @@ interface SessionState {
   currentIndex: number
   currentPositionSeconds: number
   playlistName: string | null
+  currentVolume: number
   repeatMode: 'off' | 'playlist' | 'single'
   shuffleEnabled: boolean
   isPlaying: boolean
@@ -713,6 +717,7 @@ function buildQueuedSong(song: SongInfo, lid: string): QueuedSong {
 
 function buildSessionQueueSong(song: QueuedSong): SessionQueueSong {
   return {
+    id: song.id,
     lid: song.lid,
     title: song.title,
     performer: song.performer,
@@ -722,6 +727,22 @@ function buildSessionQueueSong(song: QueuedSong): SessionQueueSong {
 }
 
 function resolveSessionSongToQueuedSong(entry: SessionQueueSong): QueuedSong | null {
+  if (entry.id) {
+    const direct = currentSongsById[entry.id]
+    if (direct && direct.path && direct.exists) {
+      return buildQueuedSong(direct, entry.lid)
+    }
+  }
+
+  if (entry.path) {
+    const pathMatch = Object.values(currentSongsById).find(
+      (song) => song.path === entry.path && song.exists,
+    )
+    if (pathMatch) {
+      return buildQueuedSong(pathMatch, entry.lid)
+    }
+  }
+
   const playlistSong: PlaylistSong = {
     lid: entry.lid,
     title: entry.title,
@@ -773,6 +794,7 @@ function savePlaybackSession(): Promise<void> {
     currentIndex: currentPlaybackIndex,
     currentPositionSeconds: playbackElapsedSeconds,
     playlistName: currentPlaybackPlaylistName,
+    currentVolume,
     repeatMode,
     shuffleEnabled,
     isPlaying,
@@ -805,6 +827,7 @@ async function loadSavedSession() {
       currentPlaybackIndex = 0
     }
     playbackElapsedSeconds = session.currentPositionSeconds
+    currentVolume = session.currentVolume ?? currentVolume
     repeatMode = session.repeatMode
     shuffleEnabled = session.shuffleEnabled
     isPlaying = false
@@ -824,6 +847,7 @@ async function loadSavedSession() {
         updatePlaybackProgress(Math.min(playbackElapsedSeconds, durationSeconds), durationSeconds)
       }
       updateControlPanelState()
+      invoke('set_playback_volume', { volume: currentVolume }).catch((error) => console.error('Restore volume failed', error))
       renderQueuePopup()
       updatePlayingSongHighlight()
     }
@@ -955,6 +979,7 @@ async function playCurrentQueueTrack() {
     console.error('Audio playback failed', playError)
     showToast(`Playback failed for ${song.title ?? 'track'}, skipping`)
     currentPlaybackIndex += 1
+    playbackElapsedSeconds = 0
     await playCurrentQueueTrack()
     return
   }
@@ -964,18 +989,21 @@ async function handlePlaybackEnded() {
   if (!isPlaying) return
 
   if (repeatMode === 'single' && playbackQueue.length > 0) {
+    playbackElapsedSeconds = 0
     await playCurrentQueueTrack()
     return
   }
 
   if (currentPlaybackIndex < playbackQueue.length - 1) {
     currentPlaybackIndex += 1
+    playbackElapsedSeconds = 0
     await playCurrentQueueTrack()
     return
   }
 
   if (repeatMode === 'playlist' && playbackQueue.length > 0) {
     currentPlaybackIndex = 0
+    playbackElapsedSeconds = 0
     await playCurrentQueueTrack()
     return
   }
@@ -1141,6 +1169,7 @@ function resumePlayback() {
 function prevTrack() {
   if (currentPlaybackIndex > 0) {
     currentPlaybackIndex -= 1
+    playbackElapsedSeconds = 0
     updatePlayingSongHighlight()
     playCurrentQueueTrack()
     return
@@ -1148,6 +1177,7 @@ function prevTrack() {
 
   if (repeatMode === 'playlist' && playbackQueue.length > 0) {
     currentPlaybackIndex = playbackQueue.length - 1
+    playbackElapsedSeconds = 0
     updatePlayingSongHighlight()
     playCurrentQueueTrack()
     return
@@ -1159,6 +1189,7 @@ function prevTrack() {
 function nextTrack() {
   if (currentPlaybackIndex < playbackQueue.length - 1) {
     currentPlaybackIndex += 1
+    playbackElapsedSeconds = 0
     updatePlayingSongHighlight()
     playCurrentQueueTrack()
     return
@@ -1166,6 +1197,7 @@ function nextTrack() {
 
   if (repeatMode === 'playlist' && playbackQueue.length > 0) {
     currentPlaybackIndex = 0
+    playbackElapsedSeconds = 0
     updatePlayingSongHighlight()
     playCurrentQueueTrack()
     return
@@ -2039,6 +2071,16 @@ window.addEventListener('DOMContentLoaded', async () => {
     await handlePlaybackEnded()
   })
 
+  listen('perform-save-session', async () => {
+    try {
+      await savePlaybackSession()
+      allowBeforeUnload = true
+      await appWindow.close()
+    } catch (error) {
+      console.error('Session save failed during quit:', error)
+    }
+  })
+
   document.addEventListener('keydown', (event) => {
     const target = event.target as HTMLElement
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
@@ -2109,6 +2151,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   createPlaylistCancel.addEventListener('click', closeCreatePlaylistModal)
 
   window.addEventListener('beforeunload', async (event) => {
+    if (allowBeforeUnload) {
+      return
+    }
+
     const leave = confirm('Are you sure you want to leave?')
     if (!leave) {
       event.preventDefault()
